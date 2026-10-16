@@ -268,6 +268,17 @@ export default function App() {
   }, [gameState]);
 
   useEffect(() => {
+    if (gameState !== 'playing') {
+      return;
+    }
+
+    const chainBoost = Math.min(1, Math.max(0, (chain - 1) / 6));
+    const manaBoost = Math.min(1, Math.max(0, mana / 100));
+    const intensity = manaBoost * 0.7 + chainBoost * 0.3;
+    soundRef.current.setAmbientIntensity(intensity);
+  }, [gameState, chain, mana]);
+
+  useEffect(() => {
     return () => {
       soundRef.current.stopAmbient();
       timeoutIdsRef.current.forEach((id) => window.clearTimeout(id));

@@ -38,11 +38,14 @@ export class ArcaneSoundEngine {
   private noiseBuffer: AudioBuffer | null = null;
   private ambientGain: GainNode | null = null;
   private ambientFilter: BiquadFilterNode | null = null;
+  private ambientDroneGains: Array<{ node: GainNode; baseGain: number }> = [];
   private ambientOscillators: OscillatorNode[] = [];
   private ambientLfos: OscillatorNode[] = [];
   private ambientIntervalId: number | null = null;
   private ambientStep = 0;
   private ambientActive = false;
+  private ambientIntensityTarget = 0.15;
+  private ambientIntensityCurrent = 0.15;
 
   async initialize(): Promise<void> {
     if (typeof window === 'undefined') {
@@ -130,6 +133,7 @@ export class ArcaneSoundEngine {
     this.ambientIntervalId = window.setInterval(() => {
       this.scheduleAmbientStep();
     }, 430);
+    this.setAmbientIntensity(this.ambientIntensityTarget);
     this.scheduleAmbientStep();
   }
 
@@ -158,9 +162,12 @@ export class ArcaneSoundEngine {
 
     this.ambientOscillators = [];
     this.ambientLfos = [];
+    this.ambientDroneGains = [];
     this.ambientFilter = null;
     this.ambientGain = null;
     this.ambientStep = 0;
+    this.ambientIntensityCurrent = 0.15;
+    this.ambientIntensityTarget = 0.15;
 
     window.setTimeout(() => {
       toStop.forEach((node) => {
@@ -174,6 +181,30 @@ export class ArcaneSoundEngine {
       filter?.disconnect();
       ambientGain?.disconnect();
     }, 700);
+  }
+
+  setAmbientIntensity(level: number): void {
+    const normalized = clamp(level, 0, 1);
+    this.ambientIntensityTarget = normalized;
+    if (!this.context || !this.ambientActive || !this.ambientGain || !this.ambientFilter) {
+      return;
+    }
+
+    const now = this.context.currentTime;
+    const volume = 0.22 + normalized * 0.16;
+    const cutoffHz = 1600 + normalized * 2200;
+
+    this.ambientGain.gain.cancelScheduledValues(now);
+    this.ambientGain.gain.setTargetAtTime(volume, now, 0.35);
+
+    this.ambientFilter.frequency.cancelScheduledValues(now);
+    this.ambientFilter.frequency.setTargetAtTime(cutoffHz, now, 0.45);
+
+    this.ambientDroneGains.forEach(({ node, baseGain }) => {
+      const nextGain = baseGain * (0.88 + normalized * 0.7);
+      node.gain.cancelScheduledValues(now);
+      node.gain.setTargetAtTime(nextGain, now, 0.35);
+    });
   }
 
   play(event: ArcaneSoundEvent, intensity = 1): void {
@@ -399,6 +430,7 @@ export class ArcaneSoundEngine {
 
     osc.start();
     lfo.start();
+    this.ambientDroneGains.push({ node: voiceGain, baseGain: gainAmount });
     this.ambientOscillators.push(osc);
     this.ambientLfos.push(lfo);
   }
@@ -408,6 +440,10 @@ export class ArcaneSoundEngine {
       return;
     }
 
+    this.ambientIntensityCurrent +=
+      (this.ambientIntensityTarget - this.ambientIntensityCurrent) * 0.22;
+    const intensity = this.ambientIntensityCurrent;
+
     const rootHz = 164.81; // E3
     const pattern = [0, 3, 7, 10, 7, 5, 8, 2];
     const harmonyPattern = [12, 14, 15, 17, 19, 17, 15, 14];
@@ -415,44 +451,46 @@ export class ArcaneSoundEngine {
     const now = this.context.currentTime + 0.06;
     const leadFreq = rootHz * 2 ** (pattern[step] / 12);
     const harmonyFreq = rootHz * 2 ** (harmonyPattern[step] / 12);
-    const density = 0.017 + ((step % 4) * 0.003);
+    const density = 0.016 + ((step % 4) * 0.003) + intensity * 0.013;
+    const pulseDuration = 0.2 + intensity * 0.13;
+    const shimmer = 0.18 + intensity * 0.24;
 
     this.playAmbientPulse({
       frequency: leadFreq,
       start: now,
-      duration: 0.24,
+      duration: pulseDuration,
       gain: density,
       type: step % 2 === 0 ? 'triangle' : 'sine',
-      shimmerSend: 0.22,
+      shimmerSend: shimmer,
     });
 
     this.playAmbientPulse({
       frequency: harmonyFreq,
       start: now + 0.08,
-      duration: 0.2,
+      duration: Math.max(0.16, pulseDuration - 0.04),
       gain: density * 0.72,
       type: 'sine',
-      shimmerSend: 0.18,
+      shimmerSend: shimmer * 0.84,
     });
 
-    if (step % 4 === 0) {
+    if (step % 4 === 0 || intensity > 0.62) {
       this.playAmbientPulse({
-        frequency: leadFreq * 2,
+        frequency: leadFreq * (1.9 + intensity * 0.2),
         start: now + 0.16,
-        duration: 0.12,
-        gain: density * 0.55,
+        duration: 0.11 + intensity * 0.08,
+        gain: density * (0.5 + intensity * 0.35),
         type: 'square',
-        shimmerSend: 0.12,
+        shimmerSend: 0.12 + intensity * 0.12,
       });
     }
 
     if (step === 0 || step === 4) {
       this.playNoiseBurst({
-        durationMs: 220,
-        gain: 0.008,
+        durationMs: 190 + intensity * 180,
+        gain: 0.007 + intensity * 0.007,
         delayMs: 0,
-        startFreq: 1300,
-        endFreq: 480,
+        startFreq: 1200 + intensity * 1100,
+        endFreq: 420 + intensity * 300,
       });
     }
 
