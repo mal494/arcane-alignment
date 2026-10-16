@@ -372,6 +372,11 @@ export default function App() {
   }, []);
 
   const startGame = useCallback(() => {
+    const engine = soundRef.current;
+    // Start ambient from a user-gesture path for stricter autoplay browsers.
+    void engine.initialize().then(() => {
+      engine.startAmbient();
+    });
     playSound('buttonClick');
     setGameState('playing');
   }, [playSound]);
@@ -729,6 +734,10 @@ export default function App() {
         <GameOverScreen
           outcome={gameOutcome}
           onRestart={() => {
+            const engine = soundRef.current;
+            void engine.initialize().then(() => {
+              engine.startAmbient();
+            });
             playSound('buttonClick');
             setGameState('playing');
           }}
