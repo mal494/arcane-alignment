@@ -281,8 +281,10 @@ export default function App() {
   }, [prefersReducedMotion, queueTimeout]);
 
   const playSound = useCallback((eventName: Parameters<ArcaneSoundEngine['play']>[0], intensity?: number) => {
-    void soundRef.current.initialize();
-    soundRef.current.play(eventName, intensity);
+    const engine = soundRef.current;
+    void engine.initialize().then(() => {
+      engine.play(eventName, intensity);
+    });
   }, []);
 
   const startGame = useCallback(() => {
