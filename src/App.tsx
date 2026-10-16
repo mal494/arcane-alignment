@@ -11,7 +11,8 @@ const BOARD_TILE_SIZE = 40;
 type GameState = 'title' | 'playing' | 'gameover';
 type GameOutcome = 'win' | 'lose';
 type CellPoint = { r: number; c: number };
-type ParticleBurst = { id: number; x: number; y: number; kind: 'match' | 'win' };
+type ParticleBurst = { id: number; x: number; y: number; kind: 'match' | 'win'; intensity: number };
+type ArcaneWave = { id: number; x: number; y: number; kind: 'match' | 'win' | 'fail'; intensity: number };
 
 const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
@@ -188,8 +189,8 @@ const GameOverScreen = ({ outcome, onRestart }: { outcome: GameOutcome; onRestar
 export default function App() {
   const prefersReducedMotion = useReducedMotion();
   const soundRef = useRef(new ArcaneSoundEngine());
-  const boardRef = useRef<HTMLDivElement>(null);
   const burstIdRef = useRef(0);
+  const waveIdRef = useRef(0);
   const timeoutIdsRef = useRef<number[]>([]);
 
   const [gameState, setGameState] = useState<GameState>('title');
@@ -212,7 +213,9 @@ export default function App() {
   const [isLoadingTip, setIsLoadingTip] = useState(false);
   const [highlightedTiles, setHighlightedTiles] = useState<Set<string>>(new Set());
   const [bursts, setBursts] = useState<ParticleBurst[]>([]);
+  const [waves, setWaves] = useState<ArcaneWave[]>([]);
   const [isShaking, setIsShaking] = useState(false);
+  const [isSurging, setIsSurging] = useState(false);
   const [flashKind, setFlashKind] = useState<'none' | 'fail' | 'win'>('none');
 
   const queueTimeout = useCallback((callback: () => void, delayMs: number) => {
@@ -263,22 +266,69 @@ export default function App() {
     queueTimeout(() => setIsShaking(false), 360);
   }, [prefersReducedMotion, queueTimeout]);
 
-  const triggerBurstFromCells = useCallback((cells: CellPoint[], kind: 'match' | 'win') => {
-    if (prefersReducedMotion || cells.length === 0) {
-      return;
+  const getCellsCenter = useCallback((cells: CellPoint[]) => {
+    if (cells.length === 0) {
+      return null;
     }
-
     const centerX =
       cells.reduce((sum, cell) => sum + (cell.c + 0.5) * BOARD_TILE_SIZE, 0) / cells.length;
     const centerY =
       cells.reduce((sum, cell) => sum + (cell.r + 0.5) * BOARD_TILE_SIZE, 0) / cells.length;
+    return { centerX, centerY };
+  }, []);
+
+  const triggerSurge = useCallback((durationMs: number) => {
+    if (prefersReducedMotion) {
+      return;
+    }
+    setIsSurging(false);
+    queueTimeout(() => setIsSurging(true), 0);
+    queueTimeout(() => setIsSurging(false), durationMs);
+  }, [prefersReducedMotion, queueTimeout]);
+
+  const triggerBurstFromCells = useCallback((cells: CellPoint[], kind: 'match' | 'win', intensity = 1) => {
+    if (prefersReducedMotion || cells.length === 0) {
+      return;
+    }
+
+    const center = getCellsCenter(cells);
+    if (!center) {
+      return;
+    }
 
     const burstId = burstIdRef.current++;
-    setBursts((existing) => [...existing, { id: burstId, x: centerX, y: centerY, kind }]);
+    setBursts((existing) => [
+      ...existing,
+      { id: burstId, x: center.centerX, y: center.centerY, kind, intensity },
+    ]);
     queueTimeout(() => {
       setBursts((existing) => existing.filter((burst) => burst.id !== burstId));
-    }, kind === 'win' ? 900 : 700);
-  }, [prefersReducedMotion, queueTimeout]);
+    }, kind === 'win' ? 1000 : 760);
+  }, [getCellsCenter, prefersReducedMotion, queueTimeout]);
+
+  const triggerWaveFromCells = useCallback((
+    cells: CellPoint[],
+    kind: 'match' | 'win' | 'fail',
+    intensity = 1,
+  ) => {
+    if (prefersReducedMotion || cells.length === 0) {
+      return;
+    }
+
+    const center = getCellsCenter(cells);
+    if (!center) {
+      return;
+    }
+
+    const waveId = waveIdRef.current++;
+    setWaves((existing) => [
+      ...existing,
+      { id: waveId, x: center.centerX, y: center.centerY, kind, intensity },
+    ]);
+    queueTimeout(() => {
+      setWaves((existing) => existing.filter((wave) => wave.id !== waveId));
+    }, kind === 'win' ? 980 : 760);
+  }, [getCellsCenter, prefersReducedMotion, queueTimeout]);
 
   const playSound = useCallback((eventName: Parameters<ArcaneSoundEngine['play']>[0], intensity?: number) => {
     const engine = soundRef.current;
@@ -307,14 +357,36 @@ export default function App() {
           { r: 4, c: 4 },
         ],
         'win',
+        4.8,
       );
+      triggerWaveFromCells(
+        [
+          { r: 3, c: 3 },
+          { r: 3, c: 4 },
+          { r: 4, c: 3 },
+          { r: 4, c: 4 },
+        ],
+        'win',
+        4.6,
+      );
+      triggerSurge(560);
       return;
     }
 
     playSound('lose');
     triggerFlash('fail');
     triggerShake();
-  }, [playSound, triggerFlash, triggerBurstFromCells, triggerShake]);
+    triggerWaveFromCells(
+      [
+        { r: 3, c: 3 },
+        { r: 3, c: 4 },
+        { r: 4, c: 3 },
+        { r: 4, c: 4 },
+      ],
+      'fail',
+      3.2,
+    );
+  }, [playSound, triggerFlash, triggerBurstFromCells, triggerShake, triggerSurge, triggerWaveFromCells]);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -327,8 +399,10 @@ export default function App() {
       setTipError('');
       setHighlightedTiles(new Set());
       setBursts([]);
+      setWaves([]);
       setFlashKind('none');
       setIsShaking(false);
+      setIsSurging(false);
     }
   }, [gameState]);
 
@@ -398,6 +472,14 @@ export default function App() {
       playSound('invalidMove');
       triggerFlash('fail');
       triggerShake();
+      triggerWaveFromCells(
+        [
+          { r: selected.r, c: selected.c },
+          { r, c },
+        ],
+        'fail',
+        1.6,
+      );
       await delay(prefersReducedMotion ? 100 : 260);
       if (remainingMoves <= 0) {
         endGame('lose');
@@ -412,7 +494,9 @@ export default function App() {
       const matchKeys = new Set(matches.map(({ r: row, c: col }) => `${row},${col}`));
       setHighlightedTiles(matchKeys);
       playSound('match', currentChain);
-      triggerBurstFromCells(matches, 'match');
+      triggerBurstFromCells(matches, 'match', 1 + currentChain * 0.35);
+      triggerWaveFromCells(matches, 'match', 1 + currentChain * 0.28);
+      triggerSurge(Math.min(460, 240 + currentChain * 45));
       await delay(prefersReducedMotion ? 80 : 160);
 
       // Remove matches
@@ -485,9 +569,15 @@ export default function App() {
             <LeftPillar score={score} moves={moves} chain={chain} />
             <div className="flex flex-col gap-2">
               <div
-                ref={boardRef}
-                className={`relative w-[320px] h-[320px] bg-[#0a0e18] border border-[#1e3060] rounded-md overflow-hidden arcane-board ${isShaking ? 'arcane-board--shake' : ''}`}
+                className={`relative w-[320px] h-[320px] bg-[#0a0e18] border border-[#1e3060] rounded-md overflow-hidden arcane-board ${isShaking ? 'arcane-board--shake' : ''} ${isSurging ? 'arcane-board--surge' : ''}`}
               >
+                <div
+                  className="pointer-events-none absolute inset-0 arcane-aura"
+                  style={{ '--mana-level': `${Math.max(0.08, mana / 100)}` } as CSSProperties}
+                />
+                <div className="pointer-events-none absolute inset-0 arcane-rune-wheel">
+                  <div className="arcane-rune-wheel__inner">ᚠ ᚢ ᚦ ᚨ ᚱ ᚲ ✦ ᛉ ᛋ ᛏ ✦ ᚾ ᛁ ᛃ ᛇ</div>
+                </div>
                 <div
                   className={`pointer-events-none absolute inset-0 arcane-flash ${
                     flashKind === 'fail' ? 'arcane-flash--fail' : flashKind === 'win' ? 'arcane-flash--win' : ''
@@ -532,9 +622,33 @@ export default function App() {
                 </AnimatePresence>
 
                 <div className="pointer-events-none absolute inset-0">
+                  {waves.map((wave) => {
+                    const waveStyle: CSSProperties & {
+                      '--wave-scale': string;
+                      '--wave-opacity': string;
+                      '--wave-color': string;
+                    } = {
+                      '--wave-scale': `${0.7 + wave.intensity * 0.24}`,
+                      '--wave-opacity': `${Math.min(0.9, 0.22 + wave.intensity * 0.1)}`,
+                      '--wave-color':
+                        wave.kind === 'win'
+                          ? '#ffe080'
+                          : wave.kind === 'fail'
+                            ? '#ff8a9f'
+                            : '#86d2ff',
+                    };
+                    return (
+                      <span
+                        key={wave.id}
+                        className={`arcane-sigil-wave arcane-sigil-wave--${wave.kind}`}
+                        style={{ left: `${wave.x}px`, top: `${wave.y}px`, ...waveStyle }}
+                      />
+                    );
+                  })}
+
                   {bursts.map((burst) => {
-                    const particleCount = burst.kind === 'win' ? 18 : 11;
-                    const radius = burst.kind === 'win' ? 80 : 42;
+                    const particleCount = burst.kind === 'win' ? 22 : Math.min(20, 10 + Math.floor(burst.intensity * 3));
+                    const radius = burst.kind === 'win' ? 92 : 40 + burst.intensity * 12;
                     return (
                       <div
                         key={burst.id}
@@ -549,11 +663,13 @@ export default function App() {
                             '--dy': string;
                             '--delay': string;
                             '--particle-color': string;
+                            '--particle-size': string;
                           } = {
                             '--dx': `${Math.cos(angle) * distance}px`,
                             '--dy': `${Math.sin(angle) * distance}px`,
-                            '--delay': `${index * 12}ms`,
+                            '--delay': `${index * 10}ms`,
                             '--particle-color': burst.kind === 'win' ? '#ffe080' : '#9fd8ff',
+                            '--particle-size': `${Math.min(9, 4 + burst.intensity * 1.1)}px`,
                           };
                           return <span key={`${burst.id}-${index}`} className="arcane-particle" style={particleStyle} />;
                         })}
