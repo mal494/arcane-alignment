@@ -1,5 +1,6 @@
-const MUSIC_BASE_VOLUME = 0.08;
-const MUSIC_INTENSITY_VOLUME = 0.05;
+const MUSIC_BASE_VOLUME = 0.56;
+const MUSIC_INTENSITY_VOLUME = 0.12;
+const MUSIC_MAX_VOLUME = 0.72;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -104,7 +105,8 @@ export class BackgroundMusicController {
     if (!this.isPlayingTarget || this.isMuted) {
       return 0;
     }
-    return MUSIC_BASE_VOLUME + this.intensity * MUSIC_INTENSITY_VOLUME;
+    const volume = MUSIC_BASE_VOLUME + this.intensity * MUSIC_INTENSITY_VOLUME;
+    return clamp(volume, 0, MUSIC_MAX_VOLUME);
   }
 
   private ensureAnimationLoop(): void {
