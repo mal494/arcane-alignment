@@ -9,6 +9,13 @@ import { BackgroundMusicController } from './lib/backgroundMusic';
 const AUDIO_PREF_KEY = 'arcane-alignment-muted';
 const BOARD_TILE_SIZE = 40;
 
+const getBgmTrackPath = () => {
+  if (typeof window === 'undefined') {
+    return '/audio/mantle-of-the-ancients.mp3';
+  }
+  return new URL('audio/mantle-of-the-ancients.mp3', document.baseURI).toString();
+};
+
 type GameState = 'title' | 'playing' | 'gameover';
 type GameOutcome = 'win' | 'lose';
 type CellPoint = { r: number; c: number };
@@ -190,7 +197,7 @@ const GameOverScreen = ({ outcome, onRestart }: { outcome: GameOutcome; onRestar
 export default function App() {
   const prefersReducedMotion = useReducedMotion();
   const soundRef = useRef(new ArcaneSoundEngine());
-  const musicRef = useRef(new BackgroundMusicController('/audio/mantle-of-the-ancients.mp3'));
+  const musicRef = useRef(new BackgroundMusicController(getBgmTrackPath()));
   const burstIdRef = useRef(0);
   const waveIdRef = useRef(0);
   const timeoutIdsRef = useRef<number[]>([]);
@@ -363,10 +370,9 @@ export default function App() {
 
   const startGame = useCallback(() => {
     const music = musicRef.current;
-    // Start music from a user-gesture path for stricter autoplay browsers.
-    void music.initialize().then(() => {
-      void music.startFromGesture();
-    });
+    // Start music directly in this gesture handler for autoplay reliability.
+    music.initialize();
+    music.startFromGesture();
     playSound('buttonClick');
     setGameState('playing');
   }, [playSound]);
