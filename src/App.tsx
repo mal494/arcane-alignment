@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ELEMENTS } from './constants';
 import { generateValidBoard, findMatches, applyGravityAndRefill, TileData } from './gameLogic';
+import { requestArcaneTip } from './lib/geminiApi';
 
 const Header = () => (
   <div className="w-full h-[120px] bg-[#0a0e18] border border-[#1e3060] rounded-md flex flex-col items-center justify-center relative">
@@ -46,7 +47,17 @@ const LeftPillar = ({ score, moves, chain }: { score: number, moves: number, cha
   </div>
 );
 
-const RightPillar = () => (
+const RightPillar = ({
+  tip,
+  isLoadingTip,
+  tipError,
+  onRequestTip,
+}: {
+  tip: string;
+  isLoadingTip: boolean;
+  tipError: string;
+  onRequestTip: () => void;
+}) => (
   <div className="w-[120px] bg-[#0a0e18] border border-[#1e3060] rounded-md flex flex-col items-center py-4 px-2">
     <span className="text-[10px] text-[#c0a040] tracking-widest mb-4">-- CHALLENGE --</span>
     
@@ -65,6 +76,16 @@ const RightPillar = () => (
     <p className="text-[9px] text-[#7aa0cc] text-center leading-relaxed">
       Ice tiles deal double damage. Fire weakened until dispelled.
     </p>
+    <button
+      type="button"
+      onClick={onRequestTip}
+      disabled={isLoadingTip}
+      className="mt-3 w-full rounded border border-[#2a4080] bg-[#0d1828] px-2 py-1 text-[9px] tracking-wide text-[#9ec3ff] transition hover:bg-[#152540] disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isLoadingTip ? 'Seeking tip...' : 'Ask Gemini Tip'}
+    </button>
+    {tip && <p className="mt-2 text-[8px] text-center text-[#a9c8f0] leading-relaxed">{tip}</p>}
+    {tipError && <p className="mt-2 text-[8px] text-center text-[#ff8f8f] leading-relaxed">{tipError}</p>}
   </div>
 );
 
@@ -100,13 +121,16 @@ const TitleScreen = ({ onStart }: { onStart: () => void }) => {
 
 export default function App() {
   const [gameState, setGameState] = useState<'title' | 'playing' | 'gameover'>('title');
-  const [grid, setGrid] = useState<TileData[][]>([]);
+  const [grid, setGrid] = useState<(TileData | null)[][]>([]);
   const [selected, setSelected] = useState<{r: number, c: number} | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [score, setScore] = useState(0);
   const [moves, setMoves] = useState(30);
   const [chain, setChain] = useState(1);
   const [mana, setMana] = useState(0);
+  const [tip, setTip] = useState('');
+  const [tipError, setTipError] = useState('');
+  const [isLoadingTip, setIsLoadingTip] = useState(false);
 
   useEffect(() => {
     if (gameState === 'playing') {
@@ -115,6 +139,8 @@ export default function App() {
       setMoves(30);
       setChain(1);
       setMana(0);
+      setTip('');
+      setTipError('');
     }
   }, [gameState]);
 
@@ -178,7 +204,7 @@ export default function App() {
       // Remove matches
       const gridWithNulls = [...currentGrid.map(row => [...row])];
       matches.forEach(({ r, c }) => {
-        gridWithNulls[r][c] = null as any;
+        gridWithNulls[r][c] = null;
       });
       setGrid(gridWithNulls);
       
@@ -202,6 +228,23 @@ export default function App() {
     }
 
     setIsAnimating(false);
+  };
+
+  const handleRequestTip = async () => {
+    if (isLoadingTip || gameState !== 'playing') {
+      return;
+    }
+
+    setIsLoadingTip(true);
+    setTipError('');
+    try {
+      const nextTip = await requestArcaneTip({score, moves, chain, mana});
+      setTip(nextTip);
+    } catch (error) {
+      setTipError(error instanceof Error ? error.message : 'Unable to fetch tip');
+    } finally {
+      setIsLoadingTip(false);
+    }
   };
 
   return (
@@ -247,7 +290,12 @@ export default function App() {
               </div>
               <ChargeBar mana={mana} />
             </div>
-            <RightPillar />
+            <RightPillar
+              tip={tip}
+              isLoadingTip={isLoadingTip}
+              tipError={tipError}
+              onRequestTip={handleRequestTip}
+            />
           </div>
         </div>
       )}

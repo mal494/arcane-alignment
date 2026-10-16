@@ -9,7 +9,7 @@ let tileIdCounter = 0;
 const getNextId = () => `tile_${tileIdCounter++}`;
 
 export const generateValidBoard = (): TileData[][] => {
-  const matrix: TileData[][] = Array(ROWS).fill(null).map(() => Array(COLS).fill(null as any));
+  const matrix: (TileData | null)[][] = Array.from({length: ROWS}, () => Array(COLS).fill(null));
   const elementIds = Object.keys(ELEMENTS).map(Number);
 
   for (let r = 0; r < ROWS; r++) {
@@ -17,13 +17,13 @@ export const generateValidBoard = (): TileData[][] => {
       let validElements = [...elementIds];
       
       if (c >= 2) {
-        if (matrix[r][c-1].type === matrix[r][c-2].type) {
-          validElements = validElements.filter(e => e !== matrix[r][c-1].type);
+        if (matrix[r][c - 1]?.type === matrix[r][c - 2]?.type) {
+          validElements = validElements.filter(e => e !== matrix[r][c - 1]?.type);
         }
       }
       if (r >= 2) {
-        if (matrix[r-1][c].type === matrix[r-2][c].type) {
-          validElements = validElements.filter(e => e !== matrix[r-1][c].type);
+        if (matrix[r - 1][c]?.type === matrix[r - 2][c]?.type) {
+          validElements = validElements.filter(e => e !== matrix[r - 1][c]?.type);
         }
       }
 
@@ -31,7 +31,8 @@ export const generateValidBoard = (): TileData[][] => {
       matrix[r][c] = { id: getNextId(), type: randomElement };
     }
   }
-  return matrix;
+
+  return matrix.map(row => row.map(tile => tile as TileData));
 };
 
 export const findMatches = (matrix: (TileData | null)[][]) => {
@@ -68,7 +69,7 @@ export const findMatches = (matrix: (TileData | null)[][]) => {
 };
 
 export const applyGravityAndRefill = (matrix: (TileData | null)[][]): TileData[][] => {
-  const newMatrix: TileData[][] = Array(ROWS).fill(null).map(() => Array(COLS).fill(null as any));
+  const newMatrix: (TileData | null)[][] = Array.from({length: ROWS}, () => Array(COLS).fill(null));
   const elementIds = Object.keys(ELEMENTS).map(Number);
 
   for (let c = 0; c < COLS; c++) {
@@ -88,5 +89,5 @@ export const applyGravityAndRefill = (matrix: (TileData | null)[][]): TileData[]
     }
   }
 
-  return newMatrix;
+  return newMatrix.map(row => row.map(tile => tile as TileData));
 };
