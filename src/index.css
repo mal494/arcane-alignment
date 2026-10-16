@@ -1,1 +1,153 @@
 @import "tailwindcss";
+
+.arcane-board {
+  transform: translateZ(0);
+}
+
+.arcane-board--shake {
+  animation: arcane-board-shake 340ms ease;
+}
+
+.arcane-flash {
+  opacity: 0;
+}
+
+.arcane-flash--fail {
+  animation: arcane-flash-fail 240ms ease-out;
+}
+
+.arcane-flash--win {
+  animation: arcane-flash-win 460ms ease-out;
+}
+
+.tile-shell {
+  transition: background-color 160ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.tile-match-glow {
+  animation: arcane-match-pulse 260ms ease-in-out infinite alternate;
+}
+
+.arcane-burst {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.arcane-particle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--particle-color, #9fd8ff);
+  box-shadow: 0 0 12px var(--particle-color, #9fd8ff);
+  opacity: 0;
+  animation: arcane-particle-flight 700ms ease-out forwards;
+  animation-delay: var(--delay, 0ms);
+}
+
+.arcane-burst--win .arcane-particle {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 14px var(--particle-color, #ffe080);
+}
+
+.arcane-challenge-card {
+  animation: arcane-float 3.8s ease-in-out infinite;
+}
+
+@keyframes arcane-board-shake {
+  0% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes arcane-flash-fail {
+  0% {
+    opacity: 0;
+    background: rgba(255, 90, 90, 0.1);
+  }
+  35% {
+    opacity: 1;
+    background: rgba(255, 90, 90, 0.22);
+  }
+  100% {
+    opacity: 0;
+    background: rgba(255, 90, 90, 0);
+  }
+}
+
+@keyframes arcane-flash-win {
+  0% {
+    opacity: 0;
+    background: rgba(255, 224, 128, 0.08);
+  }
+  40% {
+    opacity: 1;
+    background: rgba(255, 224, 128, 0.2);
+  }
+  100% {
+    opacity: 0;
+    background: rgba(255, 224, 128, 0);
+  }
+}
+
+@keyframes arcane-match-pulse {
+  0% {
+    box-shadow: 0 0 8px rgba(130, 200, 255, 0.55);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 16px rgba(180, 230, 255, 0.95);
+    transform: scale(1.03);
+  }
+}
+
+@keyframes arcane-particle-flight {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.15);
+    opacity: 0;
+  }
+}
+
+@keyframes arcane-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcane-board--shake,
+  .arcane-flash--fail,
+  .arcane-flash--win,
+  .tile-match-glow,
+  .arcane-particle,
+  .arcane-challenge-card {
+    animation: none !important;
+  }
+
+  .tile-shell {
+    transition: none !important;
+  }
+}
