@@ -22,7 +22,7 @@ export type ArcaneSoundEvent =
   | 'lose'
   | 'tipReveal';
 
-const MASTER_VOLUME = 0.2;
+const MASTER_VOLUME = 0.3;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
