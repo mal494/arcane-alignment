@@ -36,6 +36,13 @@ export class ArcaneSoundEngine {
   private delayInput: GainNode | null = null;
   private muted = false;
   private noiseBuffer: AudioBuffer | null = null;
+  private ambientGain: GainNode | null = null;
+  private ambientFilter: BiquadFilterNode | null = null;
+  private ambientOscillators: OscillatorNode[] = [];
+  private ambientLfos: OscillatorNode[] = [];
+  private ambientIntervalId: number | null = null;
+  private ambientStep = 0;
+  private ambientActive = false;
 
   async initialize(): Promise<void> {
     if (typeof window === 'undefined') {
@@ -89,6 +96,84 @@ export class ArcaneSoundEngine {
       this.masterGain.gain.cancelScheduledValues(now);
       this.masterGain.gain.setTargetAtTime(nextMuted ? 0 : MASTER_VOLUME, now, 0.01);
     }
+  }
+
+  startAmbient(): void {
+    if (!this.context || !this.masterGain || this.ambientActive) {
+      return;
+    }
+
+    this.ambientActive = true;
+    this.ambientStep = 0;
+
+    const ambientGain = this.context.createGain();
+    ambientGain.gain.value = 0.0001;
+    const ambientFilter = this.context.createBiquadFilter();
+    ambientFilter.type = 'lowpass';
+    ambientFilter.frequency.value = 1900;
+    ambientFilter.Q.value = 0.8;
+
+    ambientGain.connect(ambientFilter);
+    ambientFilter.connect(this.masterGain);
+    this.ambientGain = ambientGain;
+    this.ambientFilter = ambientFilter;
+
+    const now = this.context.currentTime;
+    ambientGain.gain.cancelScheduledValues(now);
+    ambientGain.gain.setValueAtTime(0.0001, now);
+    ambientGain.gain.exponentialRampToValueAtTime(0.24, now + 1.2);
+
+    this.createAmbientDrone(98, 'sawtooth', 0.045, 0.12, 4.2);
+    this.createAmbientDrone(147, 'triangle', 0.036, -0.09, 3.1);
+    this.createAmbientDrone(220, 'sine', 0.015, 0.07, 2.4);
+
+    this.ambientIntervalId = window.setInterval(() => {
+      this.scheduleAmbientStep();
+    }, 430);
+    this.scheduleAmbientStep();
+  }
+
+  stopAmbient(): void {
+    if (!this.context) {
+      this.ambientActive = false;
+      return;
+    }
+
+    if (this.ambientIntervalId !== null) {
+      window.clearInterval(this.ambientIntervalId);
+      this.ambientIntervalId = null;
+    }
+
+    this.ambientActive = false;
+    const now = this.context.currentTime;
+    const gain = this.ambientGain;
+    if (gain) {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setTargetAtTime(0.0001, now, 0.12);
+    }
+
+    const toStop = [...this.ambientOscillators, ...this.ambientLfos];
+    const filter = this.ambientFilter;
+    const ambientGain = this.ambientGain;
+
+    this.ambientOscillators = [];
+    this.ambientLfos = [];
+    this.ambientFilter = null;
+    this.ambientGain = null;
+    this.ambientStep = 0;
+
+    window.setTimeout(() => {
+      toStop.forEach((node) => {
+        try {
+          node.stop();
+        } catch {
+          // No-op: node may already be stopped.
+        }
+        node.disconnect();
+      });
+      filter?.disconnect();
+      ambientGain?.disconnect();
+    }, 700);
   }
 
   play(event: ArcaneSoundEvent, intensity = 1): void {
@@ -270,6 +355,164 @@ export class ArcaneSoundEngine {
       oscillator.stop(start + release + 0.02);
       overtone.stop(start + release + 0.03);
     });
+  }
+
+  private createAmbientDrone(
+    frequency: number,
+    wave: OscillatorType,
+    gainAmount: number,
+    detuneOffset: number,
+    lfoHz: number,
+  ): void {
+    if (!this.context || !this.ambientGain) {
+      return;
+    }
+
+    const osc = this.context.createOscillator();
+    osc.type = wave;
+    osc.frequency.value = frequency;
+    osc.detune.value = detuneOffset * 100;
+
+    const voiceGain = this.context.createGain();
+    voiceGain.gain.value = gainAmount;
+    const voiceFilter = this.context.createBiquadFilter();
+    voiceFilter.type = 'lowpass';
+    voiceFilter.frequency.value = 1200;
+    voiceFilter.Q.value = 0.9;
+
+    const lfo = this.context.createOscillator();
+    const lfoGain = this.context.createGain();
+    lfo.frequency.value = lfoHz;
+    lfoGain.gain.value = 6;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.detune);
+
+    osc.connect(voiceFilter);
+    voiceFilter.connect(voiceGain);
+    voiceGain.connect(this.ambientGain);
+    if (this.delayInput) {
+      const shimmerSend = this.context.createGain();
+      shimmerSend.gain.value = 0.04;
+      voiceGain.connect(shimmerSend);
+      shimmerSend.connect(this.delayInput);
+    }
+
+    osc.start();
+    lfo.start();
+    this.ambientOscillators.push(osc);
+    this.ambientLfos.push(lfo);
+  }
+
+  private scheduleAmbientStep(): void {
+    if (!this.context || !this.ambientGain || !this.ambientActive) {
+      return;
+    }
+
+    const rootHz = 164.81; // E3
+    const pattern = [0, 3, 7, 10, 7, 5, 8, 2];
+    const harmonyPattern = [12, 14, 15, 17, 19, 17, 15, 14];
+    const step = this.ambientStep % pattern.length;
+    const now = this.context.currentTime + 0.06;
+    const leadFreq = rootHz * 2 ** (pattern[step] / 12);
+    const harmonyFreq = rootHz * 2 ** (harmonyPattern[step] / 12);
+    const density = 0.017 + ((step % 4) * 0.003);
+
+    this.playAmbientPulse({
+      frequency: leadFreq,
+      start: now,
+      duration: 0.24,
+      gain: density,
+      type: step % 2 === 0 ? 'triangle' : 'sine',
+      shimmerSend: 0.22,
+    });
+
+    this.playAmbientPulse({
+      frequency: harmonyFreq,
+      start: now + 0.08,
+      duration: 0.2,
+      gain: density * 0.72,
+      type: 'sine',
+      shimmerSend: 0.18,
+    });
+
+    if (step % 4 === 0) {
+      this.playAmbientPulse({
+        frequency: leadFreq * 2,
+        start: now + 0.16,
+        duration: 0.12,
+        gain: density * 0.55,
+        type: 'square',
+        shimmerSend: 0.12,
+      });
+    }
+
+    if (step === 0 || step === 4) {
+      this.playNoiseBurst({
+        durationMs: 220,
+        gain: 0.008,
+        delayMs: 0,
+        startFreq: 1300,
+        endFreq: 480,
+      });
+    }
+
+    this.ambientStep++;
+  }
+
+  private playAmbientPulse({
+    frequency,
+    start,
+    duration,
+    gain,
+    type,
+    shimmerSend,
+  }: {
+    frequency: number;
+    start: number;
+    duration: number;
+    gain: number;
+    type: OscillatorType;
+    shimmerSend: number;
+  }): void {
+    if (!this.context || !this.ambientGain) {
+      return;
+    }
+
+    const osc = this.context.createOscillator();
+    osc.type = type;
+    osc.frequency.value = frequency;
+    osc.detune.value = (Math.random() - 0.5) * 6;
+
+    const env = this.context.createGain();
+    env.gain.setValueAtTime(0.0001, start);
+    env.gain.linearRampToValueAtTime(gain, start + 0.045);
+    env.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = Math.min(2400, frequency * 2.3);
+    filter.Q.value = 0.85;
+
+    osc.connect(filter);
+    filter.connect(env);
+    env.connect(this.ambientGain);
+    let send: GainNode | null = null;
+    if (this.delayInput) {
+      send = this.context.createGain();
+      send.gain.value = shimmerSend;
+      env.connect(send);
+      send.connect(this.delayInput);
+    }
+
+    osc.onended = () => {
+      osc.disconnect();
+      filter.disconnect();
+      env.disconnect();
+      send?.disconnect();
+    };
+
+    osc.start(start);
+    osc.stop(start + duration + 0.04);
   }
 
   private playNoiseBurst({

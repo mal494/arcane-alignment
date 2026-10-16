@@ -246,7 +246,30 @@ export default function App() {
   }, [isMuted]);
 
   useEffect(() => {
+    const engine = soundRef.current;
+    let cancelled = false;
+
+    if (gameState === 'playing') {
+      void engine.initialize().then(() => {
+        if (!cancelled) {
+          engine.startAmbient();
+        }
+      });
+    } else {
+      engine.stopAmbient();
+    }
+
     return () => {
+      cancelled = true;
+      if (gameState === 'playing') {
+        engine.stopAmbient();
+      }
+    };
+  }, [gameState]);
+
+  useEffect(() => {
+    return () => {
+      soundRef.current.stopAmbient();
       timeoutIdsRef.current.forEach((id) => window.clearTimeout(id));
       timeoutIdsRef.current = [];
     };
