@@ -4,6 +4,7 @@ import { ELEMENTS } from './constants';
 import { generateValidBoard, findMatches, applyGravityAndRefill, TileData } from './gameLogic';
 import { requestArcaneTip } from './lib/geminiApi';
 import { ArcaneSoundEngine } from './lib/sound';
+import { BackgroundMusicController } from './lib/backgroundMusic';
 
 const AUDIO_PREF_KEY = 'arcane-alignment-muted';
 const BOARD_TILE_SIZE = 40;
@@ -189,6 +190,7 @@ const GameOverScreen = ({ outcome, onRestart }: { outcome: GameOutcome; onRestar
 export default function App() {
   const prefersReducedMotion = useReducedMotion();
   const soundRef = useRef(new ArcaneSoundEngine());
+  const musicRef = useRef(new BackgroundMusicController('/audio/mantle-of-the-ancients.mp3'));
   const burstIdRef = useRef(0);
   const waveIdRef = useRef(0);
   const timeoutIdsRef = useRef<number[]>([]);
@@ -227,8 +229,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void musicRef.current.initialize();
+
     const initializeAudio = () => {
       void soundRef.current.initialize();
+      void musicRef.current.initialize();
     };
     window.addEventListener('pointerdown', initializeAudio, { once: true });
     window.addEventListener('keydown', initializeAudio, { once: true });
@@ -240,31 +245,16 @@ export default function App() {
 
   useEffect(() => {
     soundRef.current.setMuted(isMuted);
+    musicRef.current.setMuted(isMuted);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(AUDIO_PREF_KEY, String(isMuted));
     }
   }, [isMuted]);
 
   useEffect(() => {
-    const engine = soundRef.current;
-    let cancelled = false;
-
-    if (gameState === 'playing') {
-      void engine.initialize().then(() => {
-        if (!cancelled) {
-          engine.startAmbient();
-        }
-      });
-    } else {
-      engine.stopAmbient();
+    if (gameState !== 'playing') {
+      musicRef.current.stopWithFade();
     }
-
-    return () => {
-      cancelled = true;
-      if (gameState === 'playing') {
-        engine.stopAmbient();
-      }
-    };
   }, [gameState]);
 
   useEffect(() => {
@@ -275,12 +265,12 @@ export default function App() {
     const chainBoost = Math.min(1, Math.max(0, (chain - 1) / 6));
     const manaBoost = Math.min(1, Math.max(0, mana / 100));
     const intensity = manaBoost * 0.7 + chainBoost * 0.3;
-    soundRef.current.setAmbientIntensity(intensity);
+    musicRef.current.setIntensity(intensity);
   }, [gameState, chain, mana]);
 
   useEffect(() => {
     return () => {
-      soundRef.current.stopAmbient();
+      musicRef.current.dispose();
       timeoutIdsRef.current.forEach((id) => window.clearTimeout(id));
       timeoutIdsRef.current = [];
     };
@@ -372,10 +362,10 @@ export default function App() {
   }, []);
 
   const startGame = useCallback(() => {
-    const engine = soundRef.current;
-    // Start ambient from a user-gesture path for stricter autoplay browsers.
-    void engine.initialize().then(() => {
-      engine.startAmbient();
+    const music = musicRef.current;
+    // Start music from a user-gesture path for stricter autoplay browsers.
+    void music.initialize().then(() => {
+      void music.startFromGesture();
     });
     playSound('buttonClick');
     setGameState('playing');
@@ -734,12 +724,7 @@ export default function App() {
         <GameOverScreen
           outcome={gameOutcome}
           onRestart={() => {
-            const engine = soundRef.current;
-            void engine.initialize().then(() => {
-              engine.startAmbient();
-            });
-            playSound('buttonClick');
-            setGameState('playing');
+            startGame();
           }}
         />
       )}
