@@ -10,22 +10,16 @@ type GeminiTipResponse = {
   error?: string;
 };
 
-function buildTipPrompt({score, moves, chain, mana}: TipContext): string {
-  return [
-    'You are an expert match-3 game coach.',
-    'Give one short tactical tip (maximum 20 words).',
-    `Current score: ${score}.`,
-    `Moves left: ${moves}.`,
-    `Current chain multiplier: ${chain}.`,
-    `Arcane charge: ${mana}%.`,
-  ].join(' ');
-}
-
 export async function requestArcaneTip(context: TipContext): Promise<string> {
   const response = await fetch('/api/gemini-tip', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({prompt: buildTipPrompt(context)}),
+    body: JSON.stringify({
+      score: Math.max(0, Math.round(context.score)),
+      moves: Math.max(0, Math.round(context.moves)),
+      chain: Math.max(0, Math.round(context.chain)),
+      mana: Math.min(100, Math.max(0, Math.round(context.mana))),
+    }),
   });
 
   const data = (await response.json()) as GeminiTipResponse;
