@@ -1,8 +1,11 @@
 import {GoogleGenAI} from '@google/genai';
+import {checkRateLimit, getClientIp} from './_lib/rateLimit.js';
+import {buildTipPrompt, parseTipState} from './_lib/tipState.js';
 
 type ApiRequest = {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 };
 
 type ApiResponse = {
@@ -12,38 +15,23 @@ type ApiResponse = {
 };
 
 const DEFAULT_MODEL = 'gemini-2.5-flash';
-const MAX_PROMPT_LENGTH = 2000;
-
-function getPrompt(body: unknown): string | null {
-  if (typeof body === 'string') {
-    try {
-      return getPrompt(JSON.parse(body));
-    } catch {
-      return null;
-    }
-  }
-
-  if (!body || typeof body !== 'object' || !('prompt' in body)) {
-    return null;
-  }
-
-  const prompt = (body as {prompt?: unknown}).prompt;
-  if (typeof prompt !== 'string') {
-    return null;
-  }
-
-  const trimmedPrompt = prompt.trim();
-  if (!trimmedPrompt || trimmedPrompt.length > MAX_PROMPT_LENGTH) {
-    return null;
-  }
-
-  return trimmedPrompt;
-}
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     res.status(405).json({error: 'Method not allowed'});
+    return;
+  }
+
+  const rate = await checkRateLimit(getClientIp(req.headers));
+  if ('status' in rate) {
+    if (rate.status === 429) {
+      const retryAfter = rate.reset ? Math.max(1, Math.ceil((rate.reset - Date.now()) / 1000)) : 60;
+      res.setHeader('Retry-After', String(retryAfter));
+      res.status(429).json({error: 'Too many requests'});
+    } else {
+      res.status(503).json({error: 'Service temporarily unavailable'});
+    }
     return;
   }
 
@@ -53,11 +41,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  const prompt = getPrompt(req.body);
-  if (!prompt) {
-    res.status(400).json({error: 'Request must include a non-empty prompt string'});
+  const state = parseTipState(req.body);
+  if (!state) {
+    res.status(400).json({error: 'Request must be {score, moves, chain, mana} as bounded integers'});
     return;
   }
+  const prompt = buildTipPrompt(state);
 
   try {
     const client = new GoogleGenAI({apiKey});
