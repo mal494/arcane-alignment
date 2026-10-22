@@ -1,21 +1,16 @@
-const MUSIC_BASE_GAIN = 0.08;
-const MUSIC_INTENSITY_GAIN = 0.06;
-const MUSIC_MIN_FILTER_HZ = 1400;
-const MUSIC_MAX_FILTER_HZ = 5000;
+const MUSIC_BASE_VOLUME = 0.56;
+const MUSIC_INTENSITY_VOLUME = 0.12;
+const MUSIC_MAX_VOLUME = 0.72;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /**
  * Controls the gameplay background music track (loop, fade, mute, intensity).
- * Uses MediaElement + Web Audio so we can keep volume under SFX and apply subtle filtering.
+ * Uses a plain HTMLAudioElement for robust autoplay behavior when started from a user gesture.
  */
 export class BackgroundMusicController {
   private readonly src: string;
   private audio: HTMLAudioElement | null = null;
-  private context: AudioContext | null = null;
-  private sourceNode: MediaElementAudioSourceNode | null = null;
-  private musicGain: GainNode | null = null;
-  private musicFilter: BiquadFilterNode | null = null;
   private rafId: number | null = null;
 
   private initialized = false;
@@ -29,7 +24,7 @@ export class BackgroundMusicController {
     this.src = src;
   }
 
-  async initialize(): Promise<void> {
+  initialize(): void {
     if (this.initialized || typeof window === 'undefined') {
       return;
     }
@@ -38,8 +33,15 @@ export class BackgroundMusicController {
     this.audio.preload = 'auto';
     this.audio.loop = true;
     this.audio.volume = 0;
+    this.audio.addEventListener('error', () => {
+      const mediaError = this.audio?.error;
+      console.error('[background-music] audio element error', {
+        code: mediaError?.code,
+        message: mediaError?.message,
+        src: this.audio?.currentSrc || this.src,
+      });
+    });
     this.audio.load();
-
     this.initialized = true;
   }
 
@@ -52,31 +54,25 @@ export class BackgroundMusicController {
   setIntensity(level: number): void {
     this.intensity = clamp(level, 0, 1);
     this.targetGain = this.computeTargetGain();
-    this.applyFilterTarget();
     this.ensureAnimationLoop();
   }
 
-  async startFromGesture(): Promise<void> {
-    await this.initialize();
-    this.ensureAudioGraph();
+  startFromGesture(): void {
+    this.initialize();
     if (!this.audio) {
       return;
     }
-
-    if (this.context?.state === 'suspended') {
-      await this.context.resume();
-    }
-
     this.isPlayingTarget = true;
     this.targetGain = this.computeTargetGain();
-    this.applyFilterTarget();
-
-    try {
-      await this.audio.play();
-    } catch {
-      // Autoplay can still fail on some browsers if no trusted user gesture is active.
-    }
-
+    const playAttempt = this.audio.play();
+    playAttempt?.catch((error) => {
+      console.error('[background-music] play() failed', {
+        error,
+        src: this.audio?.currentSrc || this.src,
+        muted: this.isMuted,
+        targetGain: this.targetGain,
+      });
+    });
     this.ensureAnimationLoop();
   }
 
@@ -99,16 +95,7 @@ export class BackgroundMusicController {
       this.audio.load();
     }
 
-    this.musicGain?.disconnect();
-    this.musicFilter?.disconnect();
-    this.sourceNode?.disconnect();
-    this.context?.close().catch(() => undefined);
-
     this.audio = null;
-    this.musicGain = null;
-    this.musicFilter = null;
-    this.sourceNode = null;
-    this.context = null;
     this.initialized = false;
     this.currentGain = 0;
     this.targetGain = 0;
@@ -118,18 +105,8 @@ export class BackgroundMusicController {
     if (!this.isPlayingTarget || this.isMuted) {
       return 0;
     }
-    return MUSIC_BASE_GAIN + this.intensity * MUSIC_INTENSITY_GAIN;
-  }
-
-  private applyFilterTarget(): void {
-    if (!this.context || !this.musicFilter) {
-      return;
-    }
-    const now = this.context.currentTime;
-    const nextCutoff =
-      MUSIC_MIN_FILTER_HZ + (MUSIC_MAX_FILTER_HZ - MUSIC_MIN_FILTER_HZ) * this.intensity;
-    this.musicFilter.frequency.cancelScheduledValues(now);
-    this.musicFilter.frequency.setTargetAtTime(nextCutoff, now, 0.45);
+    const volume = MUSIC_BASE_VOLUME + this.intensity * MUSIC_INTENSITY_VOLUME;
+    return clamp(volume, 0, MUSIC_MAX_VOLUME);
   }
 
   private ensureAnimationLoop(): void {
@@ -146,51 +123,19 @@ export class BackgroundMusicController {
     }
 
     const delta = this.targetGain - this.currentGain;
-    const step = delta * 0.08;
-    this.currentGain += Math.abs(step) < 0.0003 ? delta : step;
+    const step = delta * 0.09;
+    this.currentGain += Math.abs(step) < 0.00025 ? delta : step;
 
-    const appliedGain = clamp(this.currentGain, 0, 1);
-    if (this.musicGain && this.context) {
-      this.musicGain.gain.setValueAtTime(appliedGain, this.context.currentTime);
-    } else {
-      this.audio.volume = appliedGain;
-    }
+    const appliedVolume = clamp(this.currentGain, 0, 1);
+    this.audio.volume = appliedVolume;
 
-    if (!this.isPlayingTarget && appliedGain <= 0.001 && !this.audio.paused) {
+    if (!this.isPlayingTarget && appliedVolume <= 0.001 && !this.audio.paused) {
       this.audio.pause();
       this.audio.currentTime = 0;
     }
 
-    if (Math.abs(this.targetGain - this.currentGain) > 0.001 || (this.isPlayingTarget && this.audio.paused)) {
-      if (this.isPlayingTarget && this.audio.paused) {
-        void this.audio.play().catch(() => undefined);
-      }
+    if (Math.abs(this.targetGain - this.currentGain) > 0.001) {
       this.rafId = window.requestAnimationFrame(this.tick);
     }
   };
-
-  private ensureAudioGraph(): void {
-    if (!this.audio || this.context) {
-      return;
-    }
-    const Ctx =
-      window.AudioContext ??
-      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) {
-      return;
-    }
-
-    this.context = new Ctx();
-    this.sourceNode = this.context.createMediaElementSource(this.audio);
-    this.musicGain = this.context.createGain();
-    this.musicFilter = this.context.createBiquadFilter();
-    this.musicFilter.type = 'lowpass';
-    this.musicFilter.frequency.value = MUSIC_MIN_FILTER_HZ;
-    this.musicFilter.Q.value = 0.6;
-    this.musicGain.gain.value = 0;
-
-    this.sourceNode.connect(this.musicFilter);
-    this.musicFilter.connect(this.musicGain);
-    this.musicGain.connect(this.context.destination);
-  }
 }
